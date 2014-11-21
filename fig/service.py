@@ -26,7 +26,7 @@ DOCKER_CONFIG_HINTS = {
     'workdir'   : 'working_dir',
 }
 
-VALID_NAME_CHARS = '[a-zA-Z0-9]'
+VALID_NAME_CHARS = '[a-zA-Z0-9_.-]'
 
 
 class BuildError(Exception):
@@ -168,12 +168,14 @@ class Service(object):
                 log.info("Removing %s..." % c.name)
                 c.remove(**options)
 
-    def create_container(self, one_off=False, insecure_registry=False, **override_options):
+    def create_container(self, one_off=False, insecure_registry=False, name_by_service=False,
+                         **override_options):
         """
         Create a container for this service. If the image doesn't exist, attempt to pull
         it.
         """
-        container_options = self._get_container_create_options(override_options, one_off=one_off)
+        container_options = self._get_container_create_options(override_options, name_by_service=name_by_service,
+                                                               one_off=one_off)
         try:
             return Container.create(self.client, **container_options)
         except APIError as e:
@@ -188,15 +190,16 @@ class Service(object):
                 return Container.create(self.client, **container_options)
             raise
 
-    def recreate_containers(self, insecure_registry=False, **override_options):
+    def recreate_containers(self, insecure_registry=False, name_by_service=False, **override_options):
         """
         If a container for this service doesn't exist, create and start one. If there are
         any, stop them, create+start new ones, and remove the old containers.
         """
         containers = self.containers(stopped=True)
         if not containers:
-            log.info("Creating %s..." % self._next_container_name(containers))
-            container = self.create_container(insecure_registry=insecure_registry, **override_options)
+            log.info("Creating %s..." % self._new_container_name(containers, name_by_service))
+            container = self.create_container(insecure_registry=insecure_registry, name_by_service=name_by_service,
+                                              *override_options)
             self.start_container(container)
             return [(None, container)]
         else:
@@ -204,7 +207,8 @@ class Service(object):
 
             for c in containers:
                 log.info("Recreating %s..." % c.name)
-                tuples.append(self.recreate_container(c, insecure_registry=insecure_registry, **override_options))
+                tuples.append(self.recreate_container(c, insecure_registry=insecure_registry,
+                                                      name_by_service=name_by_service, **override_options))
 
             return tuples
 
@@ -273,18 +277,24 @@ class Service(object):
         )
         return container
 
-    def start_or_create_containers(self, insecure_registry=False):
+    def start_or_create_containers(self, insecure_registry=False, name_by_service=False):
         containers = self.containers(stopped=True)
 
         if not containers:
-            log.info("Creating %s..." % self._next_container_name(containers))
-            new_container = self.create_container(insecure_registry=insecure_registry)
+            log.info("Creating %s..." % self._new_container_name(containers, name_by_service))
+            new_container = self.create_container(insecure_registry=insecure_registry, name_by_service=name_by_service)
             return [self.start_container(new_container)]
         else:
             return [self.start_container_if_stopped(c) for c in containers]
 
     def get_linked_names(self):
         return [s.name for (s, _) in self.links]
+
+    def _new_container_name(self, containers, name_by_service=False, one_off=False):
+      if name_by_service:
+        return self.name
+      else:
+        return self._next_container_name(containers,one_off=one_off)
 
     def _next_container_name(self, all_containers, one_off=False):
         bits = [self.project, self.name]
@@ -329,13 +339,12 @@ class Service(object):
 
         return volumes_from
 
-    def _get_container_create_options(self, override_options, one_off=False):
+    def _get_container_create_options(self, override_options, name_by_service=False, one_off=False):
         container_options = dict((k, self.options[k]) for k in DOCKER_CONFIG_KEYS if k in self.options)
         container_options.update(override_options)
 
-        container_options['name'] = self._next_container_name(
-            self.containers(stopped=True, one_off=one_off),
-            one_off)
+        container_options['name'] = self._new_container_name(
+          self.containers(stopped=True, one_off=one_off), name_by_service, one_off)
 
         # If a qualified hostname was given, split it into an
         # unqualified hostname and a domainname unless domainname

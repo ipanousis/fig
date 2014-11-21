@@ -416,8 +416,10 @@ class TopLevelCommand(Command):
             --no-color            Produce monochrome output.
             --no-deps             Don't start linked services.
             --no-recreate         If containers already exist, don't recreate them.
+            --name-by-service     Use only the service name as the container name
         """
         insecure_registry = options['--allow-insecure-ssl']
+        name_by_service = options['--name-by-service']
         detached = options['-d']
 
         monochrome = options['--no-color']
@@ -431,6 +433,7 @@ class TopLevelCommand(Command):
             start_links=start_links,
             recreate=recreate,
             insecure_registry=insecure_registry,
+            name_by_service=name_by_service,
         )
 
         to_attach = [c for s in project.get_services(service_names) for c in s.containers()]
